@@ -68,7 +68,6 @@ sample_number,site_id,date,sample_type,method,rr,yr,lr,la,dm_lr,ly,nod,lf,wr,atx
 241,BKS_LJ_BU_SS,2025-08-05,regular,grab,0,0,0,0,0,0,0,0,0,0,0,0,NA,lower jade,buoy,surface,NA
 242,BKS_LJ_BU_DD,2025-08-05,regular,grab,0,0,0,0,0,0,0,0,0,0,0,0,NA,lower jade,buoy,bottom,NA
 243,BKS_UB_SH_09,2025-08-05,duplicate,grab,0,0,0,0,0,0,0,0,0,1.452834852,0,0,NA,upper brooks,shore,NA,NA
-244,BKS_UB_NCOVE,2025-08-05,regular,grab,0,0,0,0,0,0,0,0,0,0,0,0,NA,upper brooks,NA,NA,NA
 245,BYS_BR_SH_01,2025-08-04,regular,grab,0,0,0,0,0,0,0,0,0,0,0,0,NA,boysen,shore,NA,NA
 246,BYS_PC_SH_02,2025-08-04,regular,grab,0,0,1.044941413,0,0,0,0,0,0,0,0,0,NA,boysen,shore,NA,NA
 247,BYS_FR_SH_03,2025-08-04,regular,grab,0,0,0,0,0,0,0,0,0,0,0,0,NA,boysen,shore,NA,NA
