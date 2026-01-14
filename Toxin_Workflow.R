@@ -11,7 +11,7 @@ library(lubridate)
 main_toxin <- ("~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/Pena_2025.xlsx")
 
 ## exclude extra samples 
-exclude_site_patterns <- c("^BKS_UB_NCOVE_")  
+exclude_site_patterns <- c("^BKS_UB_NCOVE")  
 
 filter_extras <- function(df) {
   df %>%
@@ -150,7 +150,7 @@ saveRDS(sample_status_Final,
         "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/master_sample_tracking.rds")
 
 write_csv(sample_status_Final,
-          "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/master_sample_tracking.rds")
+          "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/master_sample_tracking.csv")
 
 
 #### Toxin results table wide format- all (including blanks and dups)#####
@@ -206,6 +206,7 @@ toxin_cols <- toxin_results_wide_all %>%
 
 # 2) Filter to real samples and pivot long
 toxin_results_long_regular <- toxin_results_wide_all %>%
+  filter_extras() %>% 
   mutate(
     method = str_to_lower(method),
     sample_type = str_squish(str_to_lower(sample_type)),
@@ -277,11 +278,11 @@ spatt_presence <- toxin_plot %>%
 ###################################
 
 # plot 1: GRAB: shore vs buoy within each toxin class (faceted by lake)
-grab_class_totals_focus <- grab_class_totals %>%
-  filter(toxin_class %in% c("microcystin", "anatoxin"))
+grab_totals_focus <- grab_class_totals %>%
+  filter(toxin_class %in% c("microcystin"))
 
 
-ggplot(grab_class_totals,
+ggplot(grab_totals_focus,
        aes(x = site_type, y = total)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.5) +
   geom_jitter(width = 0.15, alpha = 0.6) +
@@ -294,18 +295,8 @@ ggplot(grab_class_totals,
   ) +
   theme(legend.position = "none")
 
-toxin_plot %>%
-  summarise(
-    n_neg = sum(value < 0, na.rm = TRUE),
-    min_val = min(value, na.rm = TRUE)
-  )
 
-toxin_plot %>%
-  filter(value < 0) %>%
-  select(sample_number, site_id, date, method, congener, value) %>%
-  arrange(value) %>%
-  head(30)
-toxin_cols
+
 
 
 #core questions are:

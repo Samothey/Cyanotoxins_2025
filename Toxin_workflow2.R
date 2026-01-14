@@ -1,0 +1,709 @@
+################################################
+
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(stringr)
+library(lubridate)
+
+
+main_toxin <- ("~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/Pena_2025.xlsx")
+
+## exclude extra samples
+exclude_site_patterns <- c("^BKS_UB_NCOVE")  
+
+filter_extras <- function(df) {
+  df %>%
+    filter(!if_any(site_id, ~ str_detect(.x, exclude_site_patterns)))
+}
+
+#  derived site fields, this function will ensure the site IDs are correlated with the correct lakes, site type, and depth)
+add_site_fields <- function(df) {
+  df %>%
+    mutate(
+      lake = case_when(
+        str_detect(site_id, "^BKS_BL_") ~ "brooks",
+        str_detect(site_id, "^BKS_UB_") ~ "upper brooks",
+        str_detect(site_id, "^BKS_RN_") ~ "rainbow",
+        str_detect(site_id, "^BKS_LJ_") ~ "lower jade",
+        str_detect(site_id, "^BYS_")    ~ "boysen",
+        str_detect(site_id, "^GRAB_")   ~ "blank",
+        str_detect(site_id, "^SPATT_")   ~ "blank",
+        TRUE ~ NA_character_
+      ),
+      site_type = case_when(
+        str_detect(site_id, "_SH_") ~ "shore",
+        str_detect(site_id, "_BU_") ~ "buoy",
+        TRUE ~ NA_character_
+      ),
+      depth_category = case_when(
+        str_detect(site_id, "_SS$") ~ "surface",
+        str_detect(site_id, "_DD$") ~ "bottom",
+        TRUE ~ NA_character_
+      )
+    )
+}
+
+
+# ---- Sheet 1: Whole water results ----
+grab_result <- read_excel(main_toxin, sheet = "WholeWater") %>%
+  clean_names() %>%
+  mutate(sample_number = str_pad(as.character(sample_number), width = 3, pad = "0")) %>%
+  rename(date = sample_date) %>%            
+  mutate(
+    date = as.Date(date),
+    sample_type = str_to_lower(sample_type),
+    method = "grab"
+  ) %>%
+  filter_extras() %>%    
+  add_site_fields()
+
+# ---- Sheet 2: SPATT results (only recovered, analyzed + shipped bags will be here) ----
+spatt_result <- read_excel(main_toxin, sheet = "SPATT") %>%
+  clean_names() %>%
+  mutate(sample_number = str_pad(as.character(sample_number), width = 3, pad = "0")) %>%
+  rename(date = sample_date) %>%            
+  mutate(
+    date = as.Date(date),
+    sample_type = str_to_lower(sample_type),
+    method = "spatt"
+  ) %>%
+  filter_extras() %>%    
+  add_site_fields()
+
+#------- Sheet 3: All sample status( samples could either be: collected, shipped, lost)
+sample_status <- read_excel(main_toxin, sheet = "Sample Status") %>%
+  clean_names() %>%
+  mutate(sample_number = str_pad(as.character(sample_number), width = 3, pad = "0")) %>%
+  rename(date = sample_date) %>%
+  mutate(
+    date = as.Date(date),
+    sample_type = str_to_lower(sample_type),
+    status = str_to_lower(status),
+    method = str_to_lower(method)
+  ) %>%
+  filter_extras() %>%    
+  add_site_fields()
+
+
+#######################################################################################
+############### Metadata for samples: building a master sheet##############
+######################################################################################
+
+#----- A)
+sample_status <- read_excel(main_toxin, sheet = "Sample Status") %>%
+  clean_names() %>%
+  mutate(sample_number = str_pad(as.character(sample_number), width = 3, pad = "0")) %>%
+  rename(date = sample_date) %>%
+  mutate(
+    date = as.Date(date),
+    sample_type = str_to_lower(sample_type),
+    status = str_to_lower(status),
+    method = str_to_lower(method)
+  ) %>%
+  filter_extras() %>%    
+  add_site_fields()
+
+# ---- B) Joining the results "keys", this doesnt take the toxin result, it only creates "keys" for if the sample was analyzed
+grab_keys <- grab_result %>%
+  distinct(sample_number, site_id, date, sample_type, method) %>%
+  mutate(has_grab_result = TRUE)
+
+spatt_keys <- spatt_result %>%
+  distinct(sample_number, site_id, date, sample_type, method) %>%
+  mutate(has_spatt_result = TRUE)
+
+# ---- C) apply rules, this will help us stay organized and understand which samples (analyzed overrides; shipped + no results -> missing)  ----
+sample_status_Final <- sample_status %>%
+  left_join(grab_keys,  by = c("sample_number", "site_id", "date", "sample_type", "method")) %>%
+  left_join(spatt_keys, by = c("sample_number", "site_id", "date", "sample_type", "method")) %>%
+  mutate(
+    has_grab_result  = coalesce(has_grab_result, FALSE),
+    has_spatt_result = coalesce(has_spatt_result, FALSE),
+    status_final = case_when(
+      method == "grab"  & has_grab_result  ~ "analyzed",
+      method == "spatt" & has_spatt_result ~ "analyzed",
+      status == "shipped" & method == "grab"  & !has_grab_result  ~ "missing",
+      status == "shipped" & method == "spatt" & !has_spatt_result ~ "missing",
+      TRUE ~ status
+    )
+  )
+
+
+## Summary of what we have
+status_summary_key <- sample_status_Final %>%
+  mutate(
+    method = str_to_lower(method),
+    status_final = str_to_lower(status_final)
+  ) %>%
+  filter(status_final %in% c("missing", "lost", "analyzed")) %>%
+  count(method, status_final) %>%
+  pivot_wider(names_from = status_final, values_from = n, values_fill = 0)
+
+status_summary_key
+
+
+## save it!
+saveRDS(sample_status_Final,
+        "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/master_sample_tracking.rds")
+
+write_csv(sample_status_Final,
+          "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/master_sample_tracking.rds")
+
+
+#### Toxin results table wide format- all (including blanks and dups)#####
+toxin_results_wide_all <- bind_rows(grab_result, spatt_result) %>%
+  mutate(
+    method = str_to_lower(method),
+    sample_type = str_to_lower(sample_type)
+  )
+
+
+#Save it
+write_csv(toxin_results_wide_all,
+          "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/toxin_results_wide_all.csv")
+
+saveRDS(toxin_results_wide_all,
+        "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/toxin_results_wide_all.rds")
+
+####################################################################################################
+##  create tables with toxin results- Toxin results long (regular samples only, no dups or blanks)
+
+# identify toxin columns from the combined wide table
+meta_cols <- c("sample_number","site_id","date","sample_type","method",
+               "lake","site_type","depth_category")
+
+toxin_cols <- toxin_results_wide_all %>%
+  select(where(is.numeric)) %>%
+  names() %>%
+  setdiff(meta_cols)
+
+toxin_results_long_regular <- toxin_results_wide_all %>%
+  filter(sample_type == "regular", !lake %in% c("blank", "duplicate"), !is.na(lake)) %>%
+  pivot_longer(
+    cols = all_of(toxin_cols),
+    names_to = "congener",
+    values_to = "value"
+  )
+#save
+write_csv(toxin_results_long_regular,
+          "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025toxin_results_long_regular.csv")
+saveRDS(toxin_results_long_regular,
+        "~/Desktop/Project/Brooks_lake_2025/Cyanotoxins_2025/toxin_results_long_regular.rds")
+
+## plotting the tables
+
+# 1) Identify toxin (numeric) columns from wide table
+meta_cols <- c("sample_number","site_id","date","sample_type","method",
+               "lake","site_type","depth_category")
+
+toxin_cols <- toxin_results_wide_all %>%
+  select(where(is.numeric)) %>%
+  names() %>%
+  setdiff(meta_cols)
+
+# 2) Filter to real samples and pivot long
+toxin_results_long_regular <- toxin_results_wide_all %>%
+  filter_extras() %>%
+  mutate(
+    method = str_to_lower(method),
+    sample_type = str_squish(str_to_lower(sample_type)),
+    lake = str_to_lower(lake),
+    site_type = str_to_lower(site_type)
+  ) %>%
+  filter(
+    sample_type == "regular",
+    !is.na(lake), lake != "blank"
+  ) %>%
+  pivot_longer(
+    cols = all_of(toxin_cols),
+    names_to = "congener",
+    values_to = "value"
+  ) %>%
+  mutate(
+    congener = str_to_lower(congener)
+  )
+## 2.) create toxin- class key + join it
+
+toxin_key <- tribble(
+  ~congener, ~toxin_class,
+  "dm_lr", "microcystin",
+  "la",   "microcystin",
+  "lf",   "microcystin",
+  "lr",   "microcystin",
+  "ly",   "microcystin",
+  "rr",   "microcystin",
+  "wr",   "microcystin",
+  "yr",   "microcystin",
+  
+  "atx",  "anatoxin",
+  "hatx", "anatoxin",
+  
+  "cyl",  "cylindrospermopsin",
+  "nod",  "nodularin"
+)
+
+toxin_plot <- toxin_results_long_regular %>%
+  left_join(toxin_key, by = "congener")
+
+
+# GRAB totals by toxin class
+grab_class_totals <- toxin_plot %>%
+  filter_extras() %>%
+  filter(method == "grab") %>%
+  group_by(
+    sample_number, site_id, date, lake,
+    site_type, depth_category, method, toxin_class
+  ) %>%
+  summarise(
+    total = sum(value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+## SPATT presence/absence by toxin class
+spatt_presence <- toxin_plot %>%
+  filter(method == "spatt") %>%
+  group_by(
+    sample_number, site_id, date, lake,
+    site_type, depth_category, method, toxin_class
+  ) %>%
+  summarise(
+    detected = any(value > 0, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+############################################# PLOTS ###########################
+
+############ grab sample shore vs. buoy #################
+
+grab_class_totals_focus <- grab_class_totals %>%
+  filter(
+    lake != "boysen",
+    toxin_class %in% c("microcystin")
+  )
+
+mc_threshold <- 8  # µg/L (EPA recreational guidance)
+
+ggplot(grab_class_totals_focus,
+       aes(x = site_type, y = total)) +
+
+  geom_boxplot(outlier.shape = NA, alpha = 0.4, fill = "grey80") +
+  geom_jitter(
+    aes(color = site_type),
+    width = 0.15,
+    alpha = 0.7,
+    size = 2
+  ) +
+  geom_hline(
+    aes(yintercept = mc_threshold, color = "Microcystin threshold"),
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  scale_color_manual(
+    values = c(
+      "shore" = "#1f78b4",
+      "buoy"  = "purple4",
+      "Microcystin threshold" = "red"
+    ),
+    name = ""   # removes "Site type" title
+  ) + labs(
+    x = "Site type",
+    y = "Total toxin (µg/L)",
+    title = "GRAB samples: shore vs buoy",
+    subtitle = "Dashed red line = EPA recreational microcystin threshold (8 µg/L)"
+  ) + theme(
+    legend.position = "right",
+          panel.grid = element_blank()
+        )
+
+##### seperate graph for each lake #######
+
+library(dplyr)
+
+grab_mc_ts <- grab_class_totals %>%
+  filter(lake != "boysen", toxin_class == "microcystin") %>%
+  mutate(
+    sample_date = as.Date(date),
+    site_id = as.character(site_id),
+    depth_category = as.character(depth_category),
+    
+    depth_plot = case_when(
+      site_type == "shore" ~ "Shore",
+      site_type == "buoy" & depth_category %in% c("surface") ~ "Buoy surface",
+      site_type == "buoy" ~ "Buoy depth",
+      TRUE ~ NA_character_
+    ),
+    
+    line_id = if_else(
+      site_type == "buoy",
+      paste(site_id, depth_plot, sep = "_"),
+      site_id
+    )
+  ) %>%
+  filter(!is.na(depth_plot))
+
+
+
+### graphs ( rainbow, upper brooks, lower jade) 
+p_A <- grab_mc_ts %>%
+  filter(lake %in% lakes_A) %>%
+  ggplot(aes(x = sample_date, y = total, group = line_id, color = depth_plot)) +
+  geom_line(alpha = 0.8) +
+  geom_point(size = 2, alpha = 0.85) +
+  geom_hline(yintercept = mc_threshold, color = "red",
+             linetype = "dashed", linewidth = 0.8) +
+  facet_wrap(~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  scale_color_manual(
+    values = c(
+      "Shore"        = "#0072B2",
+      "Buoy surface" = "#E69F00",
+      "Buoy depth"   = "#009E73"
+    ),
+    name = ""
+  ) +
+  labs(
+    x = "Sample date",
+    y = "Microcystins (µg/L)",
+    title = "Microcystins over time (Rainbow, Lower Jade)",
+    subtitle = "Lines represent individual sites; colors indicate sampling context"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+p_A
+
+p_B <- grab_mc_ts %>%
+  filter(lake == "upper brooks") %>%   # adjust capitalization if needed
+  ggplot(
+    aes(
+      x = sample_date,
+      y = total,
+      group = line_id,
+      color = site_id
+    )
+  ) +
+  geom_line(alpha = 0.85) +
+  geom_point(aes(shape = depth_plot), size = 2, alpha = 0.85) +
+  geom_hline(
+    yintercept = mc_threshold,
+    color = "red",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Sample date",
+    y = "Microcystins (µg/L)",
+    color = "Site ID",
+    shape = "Sample type",
+    title = "Microcystins over time (Upper Brooks)",
+    subtitle = "shore site and buoy split into surface vs depth"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+p_B
+
+
+library(dplyr)
+library(ggplot2)
+
+mc_threshold <- 8
+
+lake_target <- "upper brooks"   # <-- change to "Upper Brooks" if that's your exact value
+
+# 1) Shore only
+p_ub_shore <- grab_mc_ts %>%
+  filter(lake == lake_target, site_type == "shore") %>%
+  ggplot(aes(x = sample_date, y = total, group = site_id, color = site_id)) +
+  geom_line(alpha = 0.85) +
+  geom_point(size = 2, alpha = 0.85) +
+  geom_hline(yintercept = mc_threshold, color = "red",
+             linetype = "dashed", linewidth = 0.8) +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Sample date",
+    y = "Microcystins (µg/L)",
+    color = "Shore site ID",
+    title = "Upper Brooks: Shore sites only",
+    subtitle = "Dashed red line = EPA recreational microcystin threshold (8 µg/L)"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+# 2) Buoy only (surface vs depth shown by shape)
+p_ub_buoy <- grab_mc_ts %>%
+  filter(lake == lake_target, site_type == "buoy") %>%
+  ggplot(aes(x = sample_date, y = total, group = line_id, color = site_id)) +
+  geom_line(alpha = 0.85) +
+  geom_point(aes(shape = depth_plot), size = 2, alpha = 0.85) +
+  geom_hline(yintercept = mc_threshold, color = "red",
+             linetype = "dashed", linewidth = 0.8) +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Sample date",
+    y = "Microcystins (µg/L)",
+    color = "Buoy site ID",
+    shape = "Buoy depth",
+    title = "Upper Brooks: Buoy sites only",
+    subtitle = "Surface vs depth shown by point shape; dashed red line = 8 µg/L"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+# 3) All together (shore + buoy)
+p_ub_all <- grab_mc_ts %>%
+  filter(lake == lake_target) %>%
+  ggplot(aes(x = sample_date, y = total, group = line_id, color = site_id)) +
+  geom_line(alpha = 0.85) +
+  geom_point(aes(shape = depth_plot), size = 2, alpha = 0.85) +
+  geom_hline(yintercept = mc_threshold, color = "red",
+             linetype = "dashed", linewidth = 0.8) +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Sample date",
+    y = "Microcystins (µg/L)",
+    color = "Site ID",
+    shape = "Sample type",
+    title = "Upper Brooks: Shore + buoy sites",
+    subtitle = "Buoy split into surface vs depth; dashed red line = 8 µg/L"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+# Print the plots
+p_ub_shore
+p_ub_buoy
+p_ub_all
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#core questions are:
+# Shore vs buoy — are toxin concentrations different?
+#  Surface vs bottom (buoy) — is there vertical structure?
+#  How does this vary by lake?
+#  How do toxin classes behave differently?
+# How does GRAB compare to SPATT?
+
+
+## more graphs ####
+
+# factor level ordering (define once)
+site_type_levels <- c("shore", "buoy")
+depth_levels <- c("surface", "bottom")
+
+grab_class_totals2 <- grab_class_totals_focus %>%
+  filter(!is.na(lake), lake != "blank", lake != "boysen") %>%
+  filter(site_type %in% site_type_levels) %>%
+  mutate(
+    site_type = factor(site_type, levels = site_type_levels),
+    depth_category = factor(depth_category, levels = depth_levels)
+  )
+
+spatt_presence2 <- spatt_presence %>%
+  filter(!is.na(lake), lake != "blank", lake != "boysen") %>%
+  filter(site_type %in% site_type_levels) %>%
+  mutate(
+    site_type = factor(site_type, levels = site_type_levels),
+    depth_category = factor(depth_category, levels = depth_levels)
+  )
+
+## paired shore buoy plots,
+grab_paired_shore_buoy <- grab_class_totals2 %>%
+  filter(method == "grab") %>%
+  group_by(lake, date, toxin_class, site_type) %>%
+  summarise(total = mean(total, na.rm = TRUE), .groups = "drop") %>%  
+  pivot_wider(names_from = site_type, values_from = total) %>%
+  filter(!is.na(shore), !is.na(buoy)) %>%
+  mutate(pair_id = paste(lake, date, toxin_class, sep = "_"))
+
+#slope plots
+grab_paired_long <- grab_paired_shore_buoy %>%
+  pivot_longer(cols = c("shore", "buoy"), names_to = "site_type", values_to = "total") %>%
+  mutate(site_type = factor(site_type, levels = site_type_levels))
+
+ggplot(grab_paired_long,
+       aes(x = site_type, y = total, group = pair_id)) +
+  geom_line(alpha = 0.5) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  labs( x = NULL, y = "Total toxin (log1p)",
+        title = "Paired GRAB comparisons: shore vs buoy (paired by lake + date)")
+
+###surface vs bottom (Grab)
+
+#build buoy only depth comaprison
+
+grab_buoy_depth <- grab_class_totals2 %>%
+  filter(method == "grab", site_type == "buoy") %>%
+  filter(depth_category %in% c("surface", "bottom"))
+
+##plot
+ggplot(grab_buoy_depth,
+       aes(x = depth_category, y = total)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.6) +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Buoy depth",
+    y = "Total toxin (log1p)",
+    title = "GRAB buoy samples: surface vs bottom"
+  ) +
+  theme(legend.position = "none")
+
+
+# paired surface bottom by date
+grab_depth_paired <- grab_buoy_depth %>%
+  group_by(lake, date, toxin_class, depth_category) %>%
+  summarise(total = mean(total, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = depth_category, values_from = total) %>%
+  filter(!is.na(surface), !is.na(bottom)) %>%
+  mutate(pair_id = paste(lake, date, toxin_class, sep = "_")) %>%
+  pivot_longer(cols = c(surface, bottom), names_to = "depth_category", values_to = "total") %>%
+  mutate(depth_category = factor(depth_category, levels = depth_levels))
+
+ggplot(grab_depth_paired,
+       aes(x = depth_category, y = total, group = pair_id)) +
+  geom_line(alpha = 0.5) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = NULL,
+    y = "Total toxin (log1p)",
+    title = "Paired GRAB buoy comparisons: surface vs bottom (paired by date)"
+  )
+
+## detection frequency plots
+## grab
+
+grab_detection <- grab_class_totals2 %>%
+  filter(method == "grab") %>%
+  mutate(detected = total > 0) %>%
+  group_by(lake, site_type, toxin_class) %>%
+  summarise(
+    n = n(),
+    n_detected = sum(detected),
+    detection_rate = n_detected / n,
+    .groups = "drop"
+  )
+
+ggplot(grab_detection,
+       aes(x = site_type, y = detection_rate)) +
+  geom_col() +
+  facet_grid(toxin_class ~ lake) +
+  labs(
+    x = "Site type",
+    y = "Detection frequency (fraction)",
+    title = "GRAB detection frequency by toxin class"
+  )
+
+## spatt frequency
+spatt_detection <- spatt_presence2 %>%
+  group_by(lake, site_type, toxin_class) %>%
+  summarise(
+    n = n(),
+    n_detected = sum(detected),
+    detection_rate = n_detected / n,
+    .groups = "drop"
+  )
+
+ggplot(spatt_detection,
+       aes(x = site_type, y = detection_rate)) +
+  geom_col() +
+  facet_grid(toxin_class ~ lake) +
+  labs(
+    x = "Site type",
+    y = "Detection frequency (fraction)",
+    title = "SPATT detection frequency by toxin class"
+  )
+## time series
+## grab
+
+grab_ts <- grab_class_totals2 %>%
+  filter(method == "grab") %>%
+  filter(toxin_class %in% c("microcystin"))
+
+ggplot(grab_ts,
+       aes(x = date, y = total, color = site_type)) +
+  geom_point(alpha = 0.7) +
+  geom_line(aes(group = interaction(site_id, site_type)), alpha = 0.25) +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  scale_y_continuous(trans = "log1p") +
+  labs(
+    x = "Date",
+    y = "Total toxin (log1p)",
+    title = "GRAB time series by lake"
+  )
+
+## spatt
+spatt_ts <- spatt_presence2 %>%
+  mutate(detected_num = as.integer(detected))
+
+ggplot(spatt_ts,
+       aes(x = date, y = detected_num, color = site_type)) +
+  geom_jitter(height = 0.06, width = 0, alpha = 0.7) +
+  facet_grid(toxin_class ~ lake) +
+  scale_y_continuous(breaks = c(0, 1), labels = c("Not detected", "Detected")) +
+  labs(
+    x = "Date",
+    y = "SPATT detection",
+    title = "SPATT detections through time"
+  )
+## run one lake at a time
+plot_lake_grab_ts <- function(lk) {
+  grab_ts %>%
+    filter(lake == lk) %>%
+    ggplot(aes(x = date, y = total, color = site_type)) +
+    geom_point(alpha = 0.7) +
+    geom_line(aes(group = interaction(site_id, site_type)), alpha = 0.25) +
+    facet_wrap(~ toxin_class, scales = "free_y", ncol = 1) +
+    scale_y_continuous(trans = "log1p") +
+    labs(title = paste("GRAB time series:", lk), x = "Date", y = "Total toxin (log1p)")
+}
+
+# Example:
+plot_lake_grab_ts("upper brooks")
