@@ -393,7 +393,7 @@ ggplot(df_plot, aes(x = lake, y = value_log1p, fill = site_type)) +
 
 
 #### other plot 
-mc_threshold <- 8  # µg/L (EPA recreational guidance)
+mc_threshold <- 0.8  # µg/L (EPA recreational guidance)
 
 ggplot(grab_class_totals_focus,
        aes(x = site_type, y = total)) +
@@ -429,6 +429,12 @@ ggplot(grab_class_totals_focus,
           panel.grid = element_blank()
         )
 
+# graphs -----------------------------------------------------------------
+
+# > hi ----------------------------------------------------------------------
+
+
+
 ##### seperate graph for each lake #######
 
 library(dplyr)
@@ -458,6 +464,9 @@ grab_mc_ts <- grab_class_totals %>%
 
 
 ### graphs ( rainbow, upper brooks, lower jade) 
+# lakes to include in panel A
+lakes_A <- c("rainbow", "upper brooks", "lower jade")
+
 p_A <- grab_mc_ts %>%
   filter(lake %in% lakes_A) %>%
   ggplot(aes(x = sample_date, y = total, group = line_id, color = depth_plot)) +
@@ -526,9 +535,9 @@ p_B
 library(dplyr)
 library(ggplot2)
 
-mc_threshold <- 8
+mc_threshold <- 0.8
 
-lake_target <- "upper brooks"   # <-- change to "Upper Brooks" if that's your exact value
+lake_target <- "upper brooks"   #
 
 # 1) Shore only
 p_ub_shore <- grab_mc_ts %>%
@@ -843,6 +852,230 @@ ggplot(
     strip.text = element_text(face = "bold")
   )
 
+
+
+library(dplyr)
+library(ggplot2)
+install.packages("colorspace")  # once
+library(colorspace)
+
+# ---- SPATT detection (already boolean-ish) ----
+spatt_detect <- spatt_presence2 %>%
+  filter(toxin_class %in% c("microcystin")) %>%
+  mutate(
+    method = "spatt",
+    detected = as.logical(detected),              # TRUE/FALSE
+    detected_num = as.integer(detected)           # 1/0
+  ) %>%
+  select(lake, site_id, date, toxin_class, method, detected, detected_num)
+
+# ---- GRAB detection from concentration ----
+grab_detect <- grab_class_totals2 %>%
+  filter(method == "grab", toxin_class %in% c("microcystin")) %>%
+  mutate(
+    method = "grab",
+    detected = !is.na(total) & total > 0,         # RULE: detected if total > 0
+    detected_num = as.integer(detected)
+  ) %>%
+  select(lake, site_id, date, toxin_class, method, detected, detected_num)
+
+# ---- Combine into one dataframe ----
+detect_ts <- bind_rows(grab_detect, spatt_detect) %>%
+  filter(!is.na(lake), lake != "blank", lake != "boysen") %>%
+  mutate(
+    method = factor(method, levels = c("grab", "spatt"))
+  )
+
+
+#plot 
+
+library(colorspace)
+library(ggplot2)
+
+# generate as many distinct colors as you need
+ggplot(
+  detect_ts,
+  aes(
+    x = date,
+    y = detected_num,
+    color = site_id,
+    shape = method
+  )
+) +
+  geom_jitter(
+    height = 0.06,
+    width = 0,
+    alpha = 0.8,
+    size = 2.5
+  ) +
+  facet_grid(toxin_class ~ lake) +
+  scale_y_continuous(
+    breaks = c(0, 1),
+    labels = c("Not detected", "Detected"),
+    limits = c(-0.15, 1.15)
+  ) +
+  scale_color_viridis_d(option = "turbo") +   # ← RIGHT HERE
+  labs(
+    x = "Date",
+    y = "Toxin detection",
+    color = "Site ID",
+    shape = "Method",
+    title = "Microcystin detections through time: GRAB vs SPATT"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold")
+  )
+
+### going to plot specifically showing when they dont match #####
+
+grab_detect <- grab_class_totals2 %>%
+  filter(method == "grab", toxin_class == "microcystin") %>%
+  mutate(
+    method = "grab",
+    detected = !is.na(total) & total > 0
+  ) %>%
+  select(lake, site_id, date, toxin_class, method, detected)
+
+spatt_detect <- spatt_presence2 %>%
+  filter(toxin_class == "microcystin") %>%
+  mutate(
+    method = "spatt",
+    detected = as.logical(detected)
+  ) %>%
+  select(lake, site_id, date, toxin_class, method, detected)
+
+
+
+detect_compare <- bind_rows(grab_detect, spatt_detect) %>%
+  filter(!is.na(lake), lake != "blank", lake != "boysen") %>%
+  distinct(lake, site_id, date, toxin_class, method, detected) %>%  # prevent duplicates
+  pivot_wider(names_from = method, values_from = detected) %>%
+  # keep only dates where you have both methods (true head-to-head comparison)
+  filter(!is.na(grab), !is.na(spatt)) %>%
+  mutate(
+    mismatch_type = case_when(
+      spatt & !grab ~ "SPATT detected, GRAB not",
+      grab & !spatt ~ "GRAB detected, SPATT not",
+      spatt & grab  ~ "Both detected",
+      TRUE          ~ "Both not detected"
+    ),
+    mismatch_flag = mismatch_type %in% c("SPATT detected, GRAB not", "GRAB detected, SPATT not")
+  )
+
+detect_compare_long <- detect_compare %>%
+  pivot_longer(cols = c(grab, spatt),
+               names_to = "method",
+               values_to = "detected") %>%
+  mutate(
+    method = factor(method, levels = c("grab", "spatt")),
+    detected_num = as.integer(detected)
+  )
+
+ggplot(
+  detect_compare_long,
+  aes(x = date, y = detected_num)
+) +
+  geom_jitter(
+    aes(shape = method, color = mismatch_type),
+    height = 0.2, width = 0.25,
+    alpha = 0.85, size = 2.6
+  ) +
+  facet_grid(toxin_class ~ lake) +
+  scale_y_continuous(
+    breaks = c(0, 1),
+    labels = c("Not detected", "Detected"),
+    limits = c(-0.15, 1.15)
+  ) +
+  # Make mismatches stand out; matches fade
+  scale_color_manual(values = c(
+    "SPATT detected, GRAB not" = "red3",
+    "GRAB detected, SPATT not" = "dodgerblue3",
+    "Both detected"            = "black",
+    "Both not detected"        = "grey40"
+  )) +
+  labs(
+    x = "Date",
+    y = "Toxin detection",
+    color = "Agreement",
+    shape = "Method",
+    title = "Microcystin detection agreement: GRAB vs SPATT (mismatches highlighted)"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold")
+  )
+
+detect_compare %>%
+  count(mismatch_type) %>%
+  filter(mismatch_type %in% c(
+    "SPATT detected, GRAB not",
+    "GRAB detected, SPATT not"
+  ))
+
+###
+detect_compare %>%
+  count(mismatch_type) %>%
+  filter(mismatch_type %in% c(
+    "SPATT detected, GRAB not",
+    "GRAB detected, SPATT not"
+  ))
+
+detect_compare %>%
+  filter(mismatch_type %in% c(
+    "SPATT detected, GRAB not",
+    "GRAB detected, SPATT not"
+  )) %>%
+  count(lake, mismatch_type) %>%
+  tidyr::pivot_wider(
+    names_from = mismatch_type,
+    values_from = n,
+    values_fill = 0
+  )
+
+detect_compare %>%
+  filter(mismatch_type %in% c(
+    "SPATT detected, GRAB not",
+    "GRAB detected, SPATT not"
+  )) %>%
+  count(mismatch_type) %>%
+  mutate(percent = 100 * n / sum(n))
+detect_compare %>%
+  count(mismatch_type) %>%
+  mutate(percent = round(100 * n / sum(n), 1))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ggplot() +
   # GRAB concentrations
   geom_line(
@@ -871,7 +1104,6 @@ ggplot() +
     x = "Date",
     title = "GRAB concentrations with SPATT detections overlaid"
   )
-
 
 
 
