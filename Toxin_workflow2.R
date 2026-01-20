@@ -281,7 +281,118 @@ grab_class_totals_focus <- grab_class_totals %>%
     lake != "boysen",
     toxin_class %in% c("microcystin")
   )
+### violin plots 
+library(dplyr)
+library(ggplot2)
 
+# ---- prep data ----
+df_plot <- grab_class_totals_focus %>%
+  filter(!is.na(lake), lake != "blank") %>%
+  filter(toxin_class == "microcystin") %>%
+  filter(site_type %in% c("shore", "buoy")) %>%
+  mutate(
+    lake = factor(lake),
+    value = total,      # <-- CHANGE if needed
+    value_log1p = log1p(value)
+  ) %>%
+  filter(!is.na(value_log1p))
+
+# ---- sample size labels ----
+n_labs <- df_plot %>%
+  group_by(lake) %>%
+  summarise(n = n(), .groups = "drop")
+
+y_top <- max(df_plot$value_log1p, na.rm = TRUE) * 1.2
+
+
+
+# ---- violin plot ----
+ggplot(df_plot, aes(x = lake, y = value_log1p, fill = lake)) +
+  geom_violin(
+    trim = FALSE,
+    scale = "width",   # keeps violins comparable with unequal n
+    color = "black",   # outline
+    alpha = 0.8
+  ) +
+  geom_text(
+    data = n_labs,
+    aes(x = lake, y = y_top, label = paste0("n=", n)),
+    inherit.aes = FALSE,
+    vjust = -0.6,
+    size = 3
+  ) +
+  coord_cartesian(clip = "off") +
+  labs(
+    x = "Lake",
+    y = "log(1 + microcystin concentration)",
+    title = "Distribution of microcystin concentrations by lake (shore and buoy samples combined)"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.margin = margin(5.5, 5.5, 18, 5.5)
+  )
+
+### violins for shore and buoy for each lake ###
+library(dplyr)
+library(ggplot2)
+
+# ---- prep data ----
+df_plot <- grab_class_totals_focus %>%
+  filter(!is.na(lake), lake != "blank", lake != "boysen") %>%
+  filter(toxin_class == "microcystin") %>%
+  filter(site_type %in% c("shore", "buoy")) %>%
+  mutate(
+    lake = factor(lake),
+    site_type = factor(site_type, levels = c("shore", "buoy")),
+    value = total,     
+    value_log1p = log1p(value)
+  ) %>%
+  filter(!is.na(value_log1p))
+
+# ---- sample sizes per lake x site_type ----
+n_labs <- df_plot %>%
+  group_by(lake, site_type) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Put labels above the tallest violin + add padding
+y_top <- max(df_plot$value_log1p, na.rm = TRUE) * 1.2
+
+ggplot(df_plot, aes(x = lake, y = value_log1p, fill = site_type)) +
+  geom_violin(
+    trim = FALSE,
+    scale = "width",
+    color = "black",
+    alpha = 0.85,
+    position = position_dodge(width = 0.85)
+  ) +
+  geom_text(
+    data = n_labs,
+    aes(x = lake, y = y_top, label = paste0("n=", n), group = site_type),
+    position = position_dodge(width = 0.85),
+    inherit.aes = FALSE,
+    size = 3,
+    vjust = 0
+  ) +
+  coord_cartesian(clip = "off") +
+  labs(
+    x = "Lake",
+    y = "log(1 + microcystin concentration)",
+    fill = "Site type",
+    title = "Microcystin distributions by lake: shore vs buoy"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.margin = margin(5.5, 5.5, 18, 5.5)
+  )
+
+
+
+
+
+#### other plot 
 mc_threshold <- 8  # µg/L (EPA recreational guidance)
 
 ggplot(grab_class_totals_focus,
@@ -323,7 +434,7 @@ ggplot(grab_class_totals_focus,
 library(dplyr)
 
 grab_mc_ts <- grab_class_totals %>%
-  filter(lake != "boysen", toxin_class == "microcystin") %>%
+  filter(lake != "boysen", lake != "upper brooks", toxin_class == "microcystin") %>%
   mutate(
     sample_date = as.Date(date),
     site_id = as.character(site_id),
@@ -489,36 +600,6 @@ p_ub_shore
 p_ub_buoy
 p_ub_all
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #core questions are:
 # Shore vs buoy — are toxin concentrations different?
 #  Surface vs bottom (buoy) — is there vertical structure?
@@ -526,8 +607,10 @@ p_ub_all
 #  How do toxin classes behave differently?
 # How does GRAB compare to SPATT?
 
-
-## more graphs ####
+#### paired plots 
+library(dplyr)
+library(tidyr)
+library(ggplot2)
 
 # factor level ordering (define once)
 site_type_levels <- c("shore", "buoy")
@@ -549,38 +632,60 @@ spatt_presence2 <- spatt_presence %>%
     depth_category = factor(depth_category, levels = depth_levels)
   )
 
-## paired shore buoy plots,
+## paired shore buoy plots
 grab_paired_shore_buoy <- grab_class_totals2 %>%
   filter(method == "grab") %>%
   group_by(lake, date, toxin_class, site_type) %>%
-  summarise(total = mean(total, na.rm = TRUE), .groups = "drop") %>%  
+  summarise(total = mean(total, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = site_type, values_from = total) %>%
   filter(!is.na(shore), !is.na(buoy)) %>%
-  mutate(pair_id = paste(lake, date, toxin_class, sep = "_"))
+  mutate(
+    pair_id = paste(lake, date, toxin_class, sep = "_"),
+    pair_id = factor(pair_id)  # ensures discrete legend
+  )
 
-#slope plots
+# slope plots
 grab_paired_long <- grab_paired_shore_buoy %>%
   pivot_longer(cols = c("shore", "buoy"), names_to = "site_type", values_to = "total") %>%
-  mutate(site_type = factor(site_type, levels = site_type_levels))
+  mutate(
+    site_type = factor(site_type, levels = site_type_levels),
+    pair_id = factor(pair_id)  # keep consistent after pivot
+  )
 
-ggplot(grab_paired_long,
-       aes(x = site_type, y = total, group = pair_id)) +
-  geom_line(alpha = 0.5) +
-  geom_point(size = 2, alpha = 0.8) +
+ggplot(
+  grab_paired_long,
+  aes(x = site_type, y = total, group = pair_id, color = pair_id)
+) +
+  geom_line(alpha = 0.6) +
+  geom_point(size = 2, alpha = 0.9) +
   facet_grid(toxin_class ~ lake, scales = "free_y") +
   scale_y_continuous(trans = "log1p") +
-  labs( x = NULL, y = "Total toxin (log1p)",
-        title = "Paired GRAB comparisons: shore vs buoy (paired by lake + date)")
+  labs(
+    x = NULL,
+    y = "Total toxin (log1p)",
+    color = "Site ID (pair_id)",
+    title = "Paired GRAB comparisons: shore vs buoy (paired by lake + date)"
+  )
+
+
+
 
 ###surface vs bottom (Grab)
 
-#build buoy only depth comaprison
+library(dplyr)
+library(tidyr)
+library(ggplot2)
 
+# -----------------------------
+# buoy-only data
+# -----------------------------
 grab_buoy_depth <- grab_class_totals2 %>%
   filter(method == "grab", site_type == "buoy") %>%
   filter(depth_category %in% c("surface", "bottom"))
 
-##plot
+# -----------------------------
+# exploratory box + jitter plot (unchanged)
+# -----------------------------
 ggplot(grab_buoy_depth,
        aes(x = depth_category, y = total)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.5) +
@@ -594,28 +699,52 @@ ggplot(grab_buoy_depth,
   ) +
   theme(legend.position = "none")
 
-
-# paired surface bottom by date
+# -----------------------------
+# paired surface–bottom by date
+# -----------------------------
 grab_depth_paired <- grab_buoy_depth %>%
   group_by(lake, date, toxin_class, depth_category) %>%
   summarise(total = mean(total, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = depth_category, values_from = total) %>%
   filter(!is.na(surface), !is.na(bottom)) %>%
-  mutate(pair_id = paste(lake, date, toxin_class, sep = "_")) %>%
-  pivot_longer(cols = c(surface, bottom), names_to = "depth_category", values_to = "total") %>%
-  mutate(depth_category = factor(depth_category, levels = depth_levels))
+  mutate(
+    pair_id = paste(lake, date, toxin_class, sep = "_"),
+    pair_id = factor(pair_id)          # ensure discrete colors
+  ) %>%
+  pivot_longer(
+    cols = c(surface, bottom),
+    names_to = "depth_category",
+    values_to = "total"
+  ) %>%
+  mutate(
+    depth_category = factor(depth_category, levels = depth_levels)
+  )
 
-ggplot(grab_depth_paired,
-       aes(x = depth_category, y = total, group = pair_id)) +
-  geom_line(alpha = 0.5) +
-  geom_point(size = 2, alpha = 0.8) +
+# -----------------------------
+# slope plot: colored by pair_id
+# -----------------------------
+ggplot(
+  grab_depth_paired,
+  aes(
+    x = depth_category,
+    y = total,
+    group = pair_id,
+    color = pair_id
+  )
+) +
+  geom_line(alpha = 0.6) +
+  geom_point(size = 2, alpha = 0.9) +
   facet_grid(toxin_class ~ lake, scales = "free_y") +
   scale_y_continuous(trans = "log1p") +
   labs(
     x = NULL,
     y = "Total toxin (log1p)",
+    color = "Site ID (pair_id)",
     title = "Paired GRAB buoy comparisons: surface vs bottom (paired by date)"
   )
+
+
+
 
 ## detection frequency plots
 ## grab
@@ -681,18 +810,71 @@ ggplot(grab_ts,
 
 ## spatt
 spatt_ts <- spatt_presence2 %>%
+  filter(toxin_class %in% c("microcystin")) %>%
   mutate(detected_num = as.integer(detected))
 
-ggplot(spatt_ts,
-       aes(x = date, y = detected_num, color = site_type)) +
-  geom_jitter(height = 0.06, width = 0, alpha = 0.7) +
+ggplot(
+  spatt_ts,
+  aes(x = date, y = detected_num, color = site_type)
+) +
+  geom_jitter(
+    height = 0.06,
+    width = 0,
+    alpha = 0.75,
+    size = 2.2
+  ) +
   facet_grid(toxin_class ~ lake) +
-  scale_y_continuous(breaks = c(0, 1), labels = c("Not detected", "Detected")) +
+  scale_y_continuous(
+    breaks = c(0, 1),
+    labels = c("Not detected", "Detected"),
+    limits = c(-0.15, 1.15)
+  ) +
   labs(
     x = "Date",
     y = "SPATT detection",
-    title = "SPATT detections through time"
+    title = "SPATT microcystin detections through time"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold")
   )
+
+ggplot() +
+  # GRAB concentrations
+  geom_line(
+    data = grab_ts,
+    aes(x = date, y = total, color = site_type),
+    alpha = 0.6
+  ) +
+  geom_point(
+    data = grab_ts,
+    aes(x = date, y = total, color = site_type),
+    alpha = 0.8
+  ) +
+  
+  # SPATT detections as vertical ticks
+  geom_rug(
+    data = spatt_ts %>% filter(detected_num == 1),
+    aes(x = date),
+    sides = "b",
+    alpha = 0.7
+  ) +
+  
+  scale_y_continuous(trans = "log1p") +
+  facet_grid(toxin_class ~ lake, scales = "free_y") +
+  labs(
+    y = "GRAB microcystin (log1p)",
+    x = "Date",
+    title = "GRAB concentrations with SPATT detections overlaid"
+  )
+
+
+
+
 ## run one lake at a time
 plot_lake_grab_ts <- function(lk) {
   grab_ts %>%
