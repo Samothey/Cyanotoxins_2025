@@ -34,7 +34,7 @@ out_spatt_presence_csv <- file.path(out_dir, "spatt_presence.csv")
 
 
 # ---- Rules/constants ----
-exclude_site_patterns <- c("^BKS_UB_NCOVE")  # add more patterns as needed
+exclude_site_patterns <- c("^BKS_UB_NCOVE")  # add more as needed
 
 site_type_levels <- c("shore", "buoy")
 depth_levels     <- c("surface", "bottom")
@@ -42,13 +42,13 @@ depth_levels     <- c("surface", "bottom")
 mc_threshold <- 0.8  # EPA/ Wyoming  threshold for recreational advsiory ug/L
 
 
-# filter extras -----------------------------------------------------------
+# filter extras
   filter_extras <- function(df) {
   df %>%
     filter(!if_any(site_id, ~ str_detect(.x, exclude_site_patterns)))
 }
 
-# ---- derive lake/site_type/depth from site_id ----
+# derive lake/site_type/depth from site_id
 add_site_fields <- function(df) {
   df %>%
     mutate(
@@ -279,11 +279,11 @@ toxin_plot <- toxin_plot %>%
   )
 
 
-# =============================================================================
+
 # STEP 5: Build toxin-class summaries used for plots
 #   - GRAB: total concentration by toxin class (sum congeners)
 #   - SPATT: detection by toxin class (any congener detected)
-# =============================================================================
+
 # ---- GRAB totals by toxin class -----------------------------------------
 # One row per: sample_number × site_id × date × depth_category × toxin_class
 grab_class_totals <- toxin_plot %>%
