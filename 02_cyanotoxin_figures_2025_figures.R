@@ -24,7 +24,7 @@ library(tidyverse)
 library(lubridate)
 
 # ---- Paths ----
-out_dir <- "~/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/"
+out_dir <- "C:/Users/spena5/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025"
 
 grab_path  <- file.path(out_dir, "grab_class_totals.rds")
 spatt_path <- file.path(out_dir, "spatt_presence.rds")
@@ -345,4 +345,8 @@ detect_compare %>%
   count(mismatch_type) %>%
   arrange(desc(n)) %>%
   print()
+
+
+
+
          

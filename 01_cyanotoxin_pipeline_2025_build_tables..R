@@ -18,9 +18,9 @@ library(janitor)
 library(lubridate)
 
 # ---- File paths  ----
-main_toxin <- "~/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/Pena_2025.xlsx"
+main_toxin <- "C:/Users/spena5/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/Pena_2025.xlsx"
 
-out_dir   <- "~/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/"
+out_dir   <- "C:/Users/spena5/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025"
 out_master_rds <- file.path(out_dir, "master_sample_tracking.rds")
 out_master_csv <- file.path(out_dir, "master_sample_tracking.csv")
 out_wide_rds   <- file.path(out_dir, "toxin_results_wide_all.rds")
