@@ -1,8 +1,8 @@
 
-source("C:/Users/spena5/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/class_scripts/load_packages.r")
+source("~/Desktop/quant analys/cyano_tox_2025/class_scripts/load_packages.r")
 
 
-grab_totals <- read_rds("C:/Users/spena5/Desktop/Project/Brooks_lake_2025/CODE/cyanotoxin/Cyanotoxins_2025/grab_class_totals.rds")
+grab_totals <- read_rds("~/Desktop/quant analys/cyano_tox_2025/grab_class_totals.rds")
 
 brooks_tox <- grab_totals %>%
   filter(lake == "brooks",
@@ -70,16 +70,6 @@ ggplot(brooks_tox, aes(x = total, fill = site_type)) +
   theme_minimal()
 
   
-ggplot(brooks_tox, aes(x = date, y = total)) +
-  geom_point(size = 2, alpha = 0.7) +
-  geom_line(aes(group = site_id), alpha = 0.4) +
-  labs(
-    title = "Microcystin Concentrations Over Time — Brooks Lake",
-    x = "Date",
-    y = "Total Microcystin (µg/L)"
-  ) +
-  theme_classic()
-
 
 ggplot(brooks_tox, aes(date, total, color = site_type)) +
   geom_point(size = 2, alpha = 0.8) +
@@ -94,7 +84,48 @@ ggplot(brooks_tox, aes(date, total, color = site_type)) +
 
   
   
+  deq_nutrients <- readRDS("~/Desktop/Project/Brooks_lake_2025/CODE/nutrients/deq_nutrients/deq_nutrients_clean_2025.rds")
+  brooks_nutrients <-  deq_nutrients %>%
+    filter(lake == "Brooks Lake", !depth %in% c("middle", "thermocline", "epilimnion"),
+           date != as.Date("2025-03-24")
+           )
   
+  
+  glimpse(brooks_nutrients)
+  
+
+  
+  nutrients_long <- brooks_nutrients %>%
+    pivot_longer(
+      cols = c(ammonia, din, tn, tp, tn_tp, chla),
+      names_to = "parameter",
+      values_to = "value"
+    )
+  
+  ggplot(nutrients_long, aes(x = parameter, y = value)) +
+    geom_boxplot(outlier.color = "red") +
+    geom_jitter(width = 0.15, alpha = 0.6) +
+    theme_minimal() +
+    scale_y_log10() +
+    labs(title = "Nutrient distributions for Brooks (log scale)",
+         y = "Concentration",
+         x = "")
+  
+  
+  ggplot(nutrients_long, aes(depth, value)) +
+    geom_boxplot() +
+    geom_jitter(width = 0.1, alpha = 0.6) +
+    facet_wrap(~parameter, scales = "free_y") +
+    scale_y_log10() +
+    theme_minimal()
+  
+  
+  ggplot(nutrients_long, aes(date, value, color = depth)) +
+    geom_point(size = 3) +
+    geom_line() +
+    facet_wrap(~parameter, scales = "free_y") +
+    scale_y_log10() +
+    theme_minimal()
   
   
   
